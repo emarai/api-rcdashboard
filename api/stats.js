@@ -84,22 +84,20 @@ export const getMembers = async (accountId) => {
 
   let followers = new Set(
     Object.keys(
-      await socialKeys(`*/graph/follow/${accountId}`, null, {
+      (await socialKeys(`*/graph/follow/${accountId}`, null, {
         return_type: "BlockHeight",
         values_only: true,
-      }) || {}
+      })) || {}
     )
   );
 
   let following = Object.keys(
-    (await socialKeys(
-      `${accountId}/graph/follow/*`,
-      null,
-      {
+    (
+      await socialKeys(`${accountId}/graph/follow/*`, null, {
         return_type: "BlockHeight",
         values_only: true,
-      }
-    ))?.[accountId]?.graph?.follow || {}
+      })
+    )?.[accountId]?.graph?.follow || {}
   );
 
   let members = [...new Set(following.filter((item) => followers.has(item)))];
@@ -112,13 +110,13 @@ export const getMembers = async (accountId) => {
 
 export const getRecursiveMembers = async (accountId) => {
   const members = await getMembers(accountId);
-  const result = await Promise.all(members.map(
-    async (rcAccountId) => await getMembers(rcAccountId)
-  ));
+  const result = await Promise.all(
+    members.map(async (rcAccountId) => await getMembers(rcAccountId))
+  );
   return result.flat();
 };
 
-export const generateTotalLikes = (members) => {
+export const generateTotalLikes = async (members) => {
   if (members.length === 0) return [];
   const formattedMembers = JSON.stringify(members)
     .replaceAll("[", "(")
@@ -134,5 +132,173 @@ export const generateTotalLikes = (members) => {
           and signer_id in ${formattedMembers}
     `;
 
-  return doQueryToFlipside(query);
+  return await doQueryToFlipside(query);
+};
+
+export const generateMAU = async (members) => {
+  if (members.length === 0) return [];
+  const formattedMembers = JSON.stringify(members)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll('"', "'");
+
+  const query = `
+    SELECT
+        date_trunc('month', a.block_timestamp) AS "date",
+        concat(
+            date_part(year, "date"),
+            '-',
+            date_part(month, "date")
+        ) as year_month,
+        count(DISTINCT a.tx_signer) AS mau
+    FROM
+        near.core.fact_transactions a
+    WHERE
+        a.tx_signer != a.tx_receiver
+    AND a.tx_signer IN ${formattedMembers}
+    AND "date" > dateadd('month', -12, current_date)
+    GROUP BY
+        1
+    ORDER BY
+        1 DESC 
+    `;
+
+  return await doQueryToFlipside(query);
+};
+
+export const generateDAU = async (members) => {
+  if (members.length === 0) return [];
+  const formattedMembers = JSON.stringify(members)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll('"', "'");
+
+  const query = `
+    SELECT
+      date_trunc('day', a.block_timestamp) AS "date",
+      concat(
+        date_part(year, "date"),
+        '-',
+        date_part(month, "date"),
+        '-',
+        date_part(day, "date")
+      ) as year_month,
+      count(DISTINCT a.tx_signer) AS dau
+    FROM
+      near.core.fact_transactions a
+    WHERE
+      a.tx_signer != a.tx_receiver
+      AND a.tx_signer IN ${formattedMembers}
+      AND "date" > dateadd('month', -1, current_date)
+    GROUP BY
+      1
+    ORDER BY
+      1 desc
+    `;
+
+  return await doQueryToFlipside(query);
+};
+
+export const generateGithubActivities = async (members) => {
+  if (members.length === 0) return [];
+  const formattedMembers = JSON.stringify(members)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll('"', "'");
+
+  const query = `
+    WITH github_accounts AS (
+      SELECT signer_id AS account,
+      JSON_EXTRACT_PATH_TEXT(profile_data, 'github') AS github_account
+      FROM
+        near.social.fact_profile_changes
+      WHERE
+        profile_section = 'linktree'
+        AND github_account != ''
+        AND account IN ${formattedMembers}
+    )
+    SELECT
+      date_trunc('month', ga.createdat) AS "date",
+      concat(
+        date_part(year, "date"),
+        '-',
+        date_part(month, "date")
+      ) AS YEAR_MONTH,
+      count(*) AS total_issues_and_pr
+    FROM
+      github_accounts a
+      JOIN near.beta.github_activity ga ON a.github_account = ga.author
+    GROUP BY
+      1
+    ORDER BY
+      1 DESC;
+    `;
+
+  return await doQueryToFlipside(query);
+};
+
+export const generateTotalWalletsCreated = async (members) => {
+  if (members.length === 0) return [];
+  const formattedMembers = JSON.stringify(members)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll('"', "'");
+  const query = `select
+      count(*) as total
+    from
+      near.core.fact_receipts
+    where
+      receiver_id = 'near'
+      AND actions:predecessor_id IN ${formattedMembers}
+      AND actions:receipt:Action:actions[0]:FunctionCall:method_name = 'create_account'
+    ;
+  `;
+
+  return await doQueryToFlipside(query);
+};
+
+export const generateNFTMints = async (members) => {
+  if (members.length === 0) return [];
+  const formattedMembers = JSON.stringify(members)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll('"', "'");
+  const query = `SELECT
+        date_trunc('month', block_timestamp) AS "date",
+        concat(
+          date_part(year, "date"),
+          '-',
+          date_part(month, "date")
+        ) AS YEAR_MONTH,
+        COUNT(DISTINCT tx_hash) as total_activity
+    FROM
+      near.nft.fact_nft_mints
+    WHERE (receiver_id IN ${formattedMembers} OR owner_id IN ${formattedMembers})
+    GROUP BY 1;
+  `;
+
+  return await doQueryToFlipside(query);
+};
+
+export const generateDappUsage = async (members) => {
+  if (members.length === 0) return [];
+  const formattedMembers = JSON.stringify(members)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll('"', "'");
+  const query = `with lst_top_dApps as (
+      select top 20
+        INITCAP( PROJECT_NAME) as dApp
+        ,count(DISTINCT block_timestamp::date) as "Activity days"
+        ,count(DISTINCT tx_hash) as TXs
+        ,TXs / "Activity days" as "Transaction per day"
+      from near.core.fact_transactions
+        join near.core.dim_address_labels on address = TX_RECEIVER
+      where label_type='dapp' and tx_signer in ${formattedMembers}
+      group by 1
+      )
+      select * from lst_top_dApps;
+  `;
+
+  return await doQueryToFlipside(query);
 };

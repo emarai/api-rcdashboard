@@ -4,6 +4,7 @@
   "main": "index.js",
   "license": "MIT",
   "dependencies": {
+    "@vercel/kv": "^1.0.1",
     "async-retry": "^1.3.3",
     "express": "^4.18.2",
     "uuid": "^9.0.1"
