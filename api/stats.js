@@ -1,5 +1,6 @@
 const { socialKeys } = require("./near-social");
 const retry = require("async-retry");
+const { kv } = require("@vercel/kv");
 
 export const statsTypeEnum = {
   mau: "mau",
@@ -68,7 +69,7 @@ export const doQueryToFlipside = async (query) => {
         redirect: "follow",
       });
       const jsonResult = await result.json();
-      if (!jsonResult.result.rows) {
+      if (jsonResult.result.originalQueryRun.state != 'QUERY_STATE_SUCCESS') {
         throw new Error("Not finished");
       } else {
         finalResult = jsonResult.result.rows;
@@ -81,6 +82,10 @@ export const doQueryToFlipside = async (query) => {
 
 export const getMembers = async (accountId) => {
   if (!accountId) return [];
+
+  const key = `${accountId}-members`;
+  const cached = await kv.get(key);
+  if (cached) return cached;
 
   let followers = new Set(
     Object.keys(
@@ -105,15 +110,34 @@ export const getMembers = async (accountId) => {
   // The RC account is part of members
   members.push(accountId);
 
+  await kv.set(key, members);
+  await kv.expire(
+    key,
+    parseInt(process.env.CACHE_EXPIRE_MEMBERS_SEC) || 60 * 60 * 24 * 1
+  );
+
   return members;
 };
 
 export const getRecursiveMembers = async (accountId) => {
+  const key = `${accountId}-members-recursive`;
+  const cached = await kv.get(key);
+  if (cached) return cached;
+
   const members = await getMembers(accountId);
   const result = await Promise.all(
     members.map(async (rcAccountId) => await getMembers(rcAccountId))
   );
-  return result.flat();
+
+  const resultFinal = result.flat();
+
+  await kv.set(key, resultFinal);
+  await kv.expire(
+    key,
+    parseInt(process.env.CACHE_EXPIRE_MEMBERS_SEC) || 60 * 60 * 24 * 1
+  );
+
+  return resultFinal;
 };
 
 export const generateTotalLikes = async (members) => {
