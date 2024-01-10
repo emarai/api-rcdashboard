@@ -11,6 +11,7 @@ export const statsTypeEnum = {
   nftMints: "nft_mints",
   dappUsage: "dapp_usage",
   dappTimeline: "dapp_timeline",
+  dappVolume: "dapp_volume",
 };
 
 export const doQueryToFlipside = async (query) => {
@@ -323,6 +324,32 @@ export const generateDappUsage = async (members) => {
       group by 1
       )
       select * from lst_top_dApps;
+  `;
+
+  return await doQueryToFlipside(query);
+};
+
+export const generateDappVolume = async (members) => {
+  if (members.length === 0) return [];
+  const formattedMembers = JSON.stringify(members)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll('"', "'");
+  const query = `with lst_dapps as (
+    select top 20
+        concat(PROJECT_NAME, '-', tx_receiver) as dApp
+        ,count(DISTINCT tx_hash) as TXs
+        ,count(DISTINCT tx_signer) as wallets
+        ,sum(deposit/pow(10,24)) as volume_NEAR
+    from near.core.fact_transfers
+      join near.core.dim_address_labels on address = TX_RECEIVER
+    where label_type='dapp'
+      and tx_signer in ${formattedMembers}
+      and status=true
+    group by 1
+    order by volume_NEAR desc
+  )
+  select * from lst_dapps
   `;
 
   return await doQueryToFlipside(query);

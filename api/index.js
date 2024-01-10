@@ -12,6 +12,7 @@ const {
   generateGithubActivities,
   generateTotalWalletsCreated,
   generateDappTimeline,
+  generateDappVolume,
 } = require("./stats");
 const { kv } = require("@vercel/kv");
 
@@ -46,6 +47,8 @@ app.get("/api/run", async (req, res) => {
     result = await generateTotalWalletsCreated(members);
   } else if (stats_type === statsTypeEnum.dappTimeline) {
     result = await generateDappTimeline(members)
+  } else if (stats_type === statsTypeEnum.dappVolume) {
+    result = await generateDappVolume(members)
   }
 
   await kv.set(key, result);
