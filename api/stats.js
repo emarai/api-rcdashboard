@@ -10,6 +10,7 @@ export const statsTypeEnum = {
   totalWalletsCreated: "total_wallets_created",
   nftMints: "nft_mints",
   dappUsage: "dapp_usage",
+  dappTimeline: "dapp_timeline",
 };
 
 export const doQueryToFlipside = async (query) => {
@@ -69,7 +70,7 @@ export const doQueryToFlipside = async (query) => {
         redirect: "follow",
       });
       const jsonResult = await result.json();
-      if (jsonResult.result.originalQueryRun.state != 'QUERY_STATE_SUCCESS') {
+      if (jsonResult.result.originalQueryRun.state != "QUERY_STATE_SUCCESS") {
         throw new Error("Not finished");
       } else {
         finalResult = jsonResult.result.rows;
@@ -184,7 +185,7 @@ export const generateMAU = async (members) => {
     GROUP BY
         1
     ORDER BY
-        1 DESC 
+        1 DESC
     `;
 
   return await doQueryToFlipside(query);
@@ -322,6 +323,42 @@ export const generateDappUsage = async (members) => {
       group by 1
       )
       select * from lst_top_dApps;
+  `;
+
+  return await doQueryToFlipside(query);
+};
+
+export const generateDappTimeline = async (members) => {
+  if (members.length === 0) return [];
+  const formattedMembers = JSON.stringify(members)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll('"', "'");
+  const query = `
+  with lst_top_dApps as (
+    select top 20
+      INITCAP( PROJECT_NAME) as dApp
+      ,count(DISTINCT block_timestamp::date) as "Activity days"
+      ,count(DISTINCT tx_hash) as TXs
+      ,TXs / "Activity days" as "Transaction per day"
+    from near.core.fact_transactions
+      join near.core.dim_address_labels on address = TX_RECEIVER
+    where label_type='dapp'
+    group by 1
+    order by TXs desc
+    )
+    select   
+      date_trunc(week,block_timestamp)::date as date
+      ,INITCAP( PROJECT_NAME) as dApp
+      ,count(DISTINCT tx_hash) as TXs
+    from near.core.fact_transactions
+      join near.core.dim_address_labels on address = TX_RECEIVER
+    where label_type='dapp'
+      and dApp in(select dApp from lst_top_dApps)
+      and block_timestamp::date > dateadd('month', -12, current_date)
+      and tx_signer in ${formattedMembers}
+    group by 1,2
+    order by 1
   `;
 
   return await doQueryToFlipside(query);
